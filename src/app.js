@@ -69,9 +69,13 @@ app.use(async (req, res, next) => {
 
   } else {
     // No MSISDN (PropellerAds / direct traffic) — detect carrier from IP via ip-api
-    detectCarrierFromIP(ip)
-      .then(({ carrier }) => { req.detectedCarrier = carrier || null; })
-      .catch(() => { req.detectedCarrier = null; });
+    // Must await before next() so req.detectedCarrier is set when route handlers run
+    try {
+      const { carrier } = await detectCarrierFromIP(ip);
+      req.detectedCarrier = carrier || null;
+    } catch {
+      req.detectedCarrier = null;
+    }
   }
 
   next();
