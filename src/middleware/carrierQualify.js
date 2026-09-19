@@ -215,4 +215,4 @@ async function qualifyCarrier(req, res, next) {
   next();
 }
 
-module.exports = { qualifyCarrier, extractMSISDN, hashMSISDN };
+module.exports = { qualifyCarrier, extractMSISDN, hashMSISDN, detectCarrierFromIP };

@@ -12,7 +12,7 @@ const adminRoutes       = require('./routes/admin');
 const eventRoutes       = require('./routes/events');          // NEW
 
 const { errorHandler }  = require('./middleware/errorHandler');
-const { extractMSISDN, hashMSISDN } = require('./middleware/carrierQualify'); // NEW
+const { extractMSISDN, hashMSISDN, detectCarrierFromIP } = require('./middleware/carrierQualify'); // NEW
 const { connectDB, query } = require('./db/client');           // NEW: query for msisdn upsert
 const { connectRedis }  = require('./db/redis');
 
@@ -34,16 +34,14 @@ app.use(morgan('dev'));
 // the number. Works for ALL carriers, not just MTN.
 app.use(async (req, res, next) => {
   const ip     = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.ip;
-  const msisdn = extractMSISDN(req); // from carrierQualify middleware
+  const msisdn = extractMSISDN(req);
 
   req.msisdn   = msisdn;
   req.clientIp = ip;
 
   if (msisdn) {
-    const msisdnHash = hashMSISDN(msisdn);
-
-    // Detect carrier from MSISDN prefix (Nigeria)
-    const prefix = msisdn.slice(3, 6); // digits after 234
+    // MSISDN present (carrier WAP gateway traffic) — detect carrier from prefix
+    const prefix = msisdn.slice(3, 6);
     const prefixMap = {
       '803':'MTN','806':'MTN','813':'MTN','816':'MTN','810':'MTN','814':'MTN','903':'MTN','906':'MTN',
       '805':'GLO','807':'GLO','811':'GLO','815':'GLO','705':'GLO',
@@ -53,7 +51,7 @@ app.use(async (req, res, next) => {
     const carrier = prefixMap[prefix] || req.headers['x-carrier'] || req.headers['x-operator'] || 'UNKNOWN';
     req.detectedCarrier = carrier;
 
-    // Upsert to msisdn_registry — fire-and-forget, never blocks the request
+    const msisdnHash = hashMSISDN(msisdn);
     query(`
       INSERT INTO msisdn_registry
         (msisdn_hash, msisdn_encrypted, carrier, first_seen_at, updated_at)
@@ -68,6 +66,12 @@ app.use(async (req, res, next) => {
       process.env.DB_ENCRYPTION_KEY || 'vaspush-default-key',
       carrier
     ]).catch(err => console.error('[MSISDN] registry upsert failed:', err.message));
+
+  } else {
+    // No MSISDN (PropellerAds / direct traffic) — detect carrier from IP via ip-api
+    detectCarrierFromIP(ip)
+      .then(({ carrier }) => { req.detectedCarrier = carrier || null; })
+      .catch(() => { req.detectedCarrier = null; });
   }
 
   next();
