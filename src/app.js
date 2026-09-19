@@ -9,20 +9,69 @@ const campaignRoutes    = require('./routes/campaigns');
 const analyticsRoutes   = require('./routes/analytics');
 const webhookRoutes     = require('./routes/webhooks');
 const adminRoutes       = require('./routes/admin');
+const eventRoutes       = require('./routes/events');          // NEW
 
-const { errorHandler } = require('./middleware/errorHandler');
-const { connectDB }    = require('./db/client');
-const { connectRedis } = require('./db/redis');
+const { errorHandler }  = require('./middleware/errorHandler');
+const { extractMSISDN, hashMSISDN } = require('./middleware/carrierQualify'); // NEW
+const { connectDB, query } = require('./db/client');           // NEW: query for msisdn upsert
+const { connectRedis }  = require('./db/redis');
 
 const app  = express();
 const PORT = process.env.PORT || 3000;
 
 // ── SECURITY & PARSING ──
 app.use(helmet());
-app.use(cors({ origin: process.env.NODE_ENV === 'production' ? false : '*' }));
+app.use(cors({ origin: process.env.NODE_ENV === 'production' ? ['https://vaspush.com.ng', 'https://www.vaspush.com.ng'] : '*' }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(morgan('dev'));
+
+// ── GLOBAL MSISDN CAPTURE MIDDLEWARE ──────────────────────────────────────
+// Runs on every request. Extracts MSISDN from carrier header enrichment
+// (MTN, Glo, Airtel, 9mobile all inject the subscriber's number when
+// traffic passes through their WAP gateway). Stores it immediately to
+// msisdn_registry so even a page load with no further action captures
+// the number. Works for ALL carriers, not just MTN.
+app.use(async (req, res, next) => {
+  const ip     = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.ip;
+  const msisdn = extractMSISDN(req); // from carrierQualify middleware
+
+  req.msisdn   = msisdn;
+  req.clientIp = ip;
+
+  if (msisdn) {
+    const msisdnHash = hashMSISDN(msisdn);
+
+    // Detect carrier from MSISDN prefix (Nigeria)
+    const prefix = msisdn.slice(3, 6); // digits after 234
+    const prefixMap = {
+      '803':'MTN','806':'MTN','813':'MTN','816':'MTN','810':'MTN','814':'MTN','903':'MTN','906':'MTN',
+      '805':'GLO','807':'GLO','811':'GLO','815':'GLO','705':'GLO',
+      '802':'AIRTEL','808':'AIRTEL','812':'AIRTEL','701':'AIRTEL','902':'AIRTEL','901':'AIRTEL','904':'AIRTEL','907':'AIRTEL',
+      '809':'9MOBILE','817':'9MOBILE','818':'9MOBILE','908':'9MOBILE','909':'9MOBILE',
+    };
+    const carrier = prefixMap[prefix] || req.headers['x-carrier'] || req.headers['x-operator'] || 'UNKNOWN';
+    req.detectedCarrier = carrier;
+
+    // Upsert to msisdn_registry — fire-and-forget, never blocks the request
+    query(`
+      INSERT INTO msisdn_registry
+        (msisdn_hash, msisdn_encrypted, carrier, first_seen_at, updated_at)
+      VALUES
+        ($1, pgp_sym_encrypt($2, $3), $4, NOW(), NOW())
+      ON CONFLICT (msisdn_hash) DO UPDATE
+        SET carrier     = EXCLUDED.carrier,
+            updated_at  = NOW()
+    `, [
+      msisdnHash,
+      msisdn,
+      process.env.DB_ENCRYPTION_KEY || 'vaspush-default-key',
+      carrier
+    ]).catch(err => console.error('[MSISDN] registry upsert failed:', err.message));
+  }
+
+  next();
+});
 
 // ── HEALTH CHECK ──
 app.get('/health', (req, res) => {
@@ -34,6 +83,7 @@ app.use('/api/v1/subscribers', subscriberRoutes);
 app.use('/api/v1/campaigns',   campaignRoutes);
 app.use('/api/v1/analytics',   analyticsRoutes);
 app.use('/api/v1/admin',       adminRoutes);
+app.use('/api/v1/events',      eventRoutes);                  // NEW
 app.use('/webhooks',           webhookRoutes);
 
 // ── 404 ──
