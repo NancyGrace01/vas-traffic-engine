@@ -91,7 +91,8 @@ async function collect(req, res) {
     }
 
     // Upsert subscriber — FCM token is the primary unique identifier
-    // On conflict: update carrier, state, source_page_id, and last_active_at
+    // On conflict: update activity fields only; never overwrite source_page_id
+    // (xmax = 0) is true only on INSERT, false on UPDATE — lets us know if this is a new subscriber
     const result = await query(
       `INSERT INTO subscribers
          (onesignal_player_id, push_token, carrier, state, device_type, os, browser,
@@ -99,33 +100,26 @@ async function collect(req, res) {
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8::inet,$9,TRUE,NOW())
        ON CONFLICT (onesignal_player_id)
        DO UPDATE SET
-         last_active_at   = NOW(),
-         is_active        = TRUE,
-         carrier          = EXCLUDED.carrier,
-         state            = EXCLUDED.state,
-         source_page_id   = COALESCE(EXCLUDED.source_page_id, subscribers.source_page_id)
-       RETURNING id, carrier, state`,
+         last_active_at = NOW(),
+         is_active      = TRUE,
+         carrier        = EXCLUDED.carrier,
+         state          = EXCLUDED.state,
+         source_page_id = subscribers.source_page_id
+       RETURNING id, carrier, state, (xmax = 0) AS is_new_row`,
       [primaryToken, push_token || primaryToken, carrier, state, device_type, os, browser, ip, sourcePageId]
     );
 
-    // Increment content page opt-in counter only on first opt-in (not on upsert update)
-    // We check opted_in_at — if it was just set to NOW() this is a new row
-    if (sourcePageId) {
+    const sub = result.rows[0];
+
+    // Only increment opt-in counter for genuinely new subscribers
+    if (sourcePageId && sub.is_new_row) {
       await query(
-        `UPDATE content_pages
-         SET total_optins = total_optins + 1, updated_at = NOW()
-         WHERE id = $1
-           AND NOT EXISTS (
-             SELECT 1 FROM subscribers
-             WHERE onesignal_player_id = $2
-               AND opted_in_at < NOW() - INTERVAL '5 seconds'
-           )`,
-        [sourcePageId, primaryToken]
+        'UPDATE content_pages SET total_optins = total_optins + 1, updated_at = NOW() WHERE id = $1',
+        [sourcePageId]
       );
     }
 
-    const sub = result.rows[0];
-    console.log(`[SUBSCRIBER] Opt-in upsert: ${sub.id} | carrier=${sub.carrier} | state=${sub.state} | page=${page_slug}`);
+    console.log(`[SUBSCRIBER] ${sub.is_new_row ? 'New opt-in' : 'Returning visitor'}: ${sub.id} | carrier=${sub.carrier} | state=${sub.state} | page=${page_slug}`);
 
     return res.json({
       success: true,
