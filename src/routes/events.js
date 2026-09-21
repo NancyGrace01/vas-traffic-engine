@@ -57,12 +57,14 @@ router.post('/', async (req, res) => {
       })
     ]);
 
-    // Update content page visitor counter
-    await query(`
-      UPDATE content_pages
-      SET total_visitors = total_visitors + 1, updated_at = NOW()
-      WHERE slug = $1
-    `, [page_slug]);
+    // Update content page visitor counter — only on page_view, not every event
+    if (event_type === 'page_view') {
+      await query(`
+        UPDATE content_pages
+        SET total_visitors = total_visitors + 1, updated_at = NOW()
+        WHERE slug = $1
+      `, [page_slug]);
+    }
 
     return res.json({
       success:    true,

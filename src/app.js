@@ -19,6 +19,10 @@ const { connectRedis }  = require('./db/redis');
 const app  = express();
 const PORT = process.env.PORT || 3000;
 
+// Trust Railway's proxy so X-Forwarded-For is read correctly
+// and express-rate-limit can identify real client IPs
+app.set('trust proxy', 1);
+
 // ── SECURITY & PARSING ──
 app.use(helmet());
 app.use(cors({ origin: process.env.NODE_ENV === 'production' ? ['https://vaspush.com.ng', 'https://www.vaspush.com.ng'] : '*' }));

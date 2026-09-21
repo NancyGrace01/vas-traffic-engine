@@ -32,8 +32,25 @@ router.get('/dashboard', async (req, res) => {
 router.get('/funnel/:id',  (req, res) => res.json({ message: 'Coming in Sprint 8' }));
 router.get('/retention',   (req, res) => res.json({ message: 'Coming in Sprint 8' }));
 router.get('/content-pages', async (req, res) => {
-  const r = await query('SELECT name, slug, total_visitors, total_optins, optin_rate FROM content_pages ORDER BY total_optins DESC');
-  return res.json(r.rows);
+  try {
+    const r = await query(`
+      SELECT
+        cp.name,
+        cp.slug,
+        cp.total_visitors,
+        COUNT(s.id)                                        AS total_optins,
+        CASE WHEN cp.total_visitors > 0
+             THEN ROUND(COUNT(s.id)::numeric / cp.total_visitors * 100, 2)
+             ELSE 0 END                                    AS optin_rate
+      FROM content_pages cp
+      LEFT JOIN subscribers s ON s.source_page_id = cp.id
+      GROUP BY cp.id, cp.name, cp.slug, cp.total_visitors
+      ORDER BY total_optins DESC
+    `);
+    return res.json(r.rows);
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
 });
 router.get('/geo',         (req, res) => res.json({ message: 'Coming in Sprint 8' }));
 
