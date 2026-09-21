@@ -91,7 +91,7 @@ async function collect(req, res) {
     }
 
     // Upsert subscriber — FCM token is the primary unique identifier
-    // onesignal_player_id column stores FCM token for backwards compat with DB schema
+    // On conflict: update carrier, state, source_page_id, and last_active_at
     const result = await query(
       `INSERT INTO subscribers
          (onesignal_player_id, push_token, carrier, state, device_type, os, browser,
@@ -99,23 +99,33 @@ async function collect(req, res) {
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8::inet,$9,TRUE,NOW())
        ON CONFLICT (onesignal_player_id)
        DO UPDATE SET
-         last_active_at = NOW(),
-         is_active = TRUE,
-         carrier = EXCLUDED.carrier
+         last_active_at   = NOW(),
+         is_active        = TRUE,
+         carrier          = EXCLUDED.carrier,
+         state            = EXCLUDED.state,
+         source_page_id   = COALESCE(EXCLUDED.source_page_id, subscribers.source_page_id)
        RETURNING id, carrier, state`,
       [primaryToken, push_token || primaryToken, carrier, state, device_type, os, browser, ip, sourcePageId]
     );
 
-    // Increment content page opt-in counter
+    // Increment content page opt-in counter only on first opt-in (not on upsert update)
+    // We check opted_in_at — if it was just set to NOW() this is a new row
     if (sourcePageId) {
       await query(
-        'UPDATE content_pages SET total_optins = total_optins + 1, updated_at = NOW() WHERE id = $1',
-        [sourcePageId]
+        `UPDATE content_pages
+         SET total_optins = total_optins + 1, updated_at = NOW()
+         WHERE id = $1
+           AND NOT EXISTS (
+             SELECT 1 FROM subscribers
+             WHERE onesignal_player_id = $2
+               AND opted_in_at < NOW() - INTERVAL '5 seconds'
+           )`,
+        [sourcePageId, primaryToken]
       );
     }
 
     const sub = result.rows[0];
-    console.log(`[SUBSCRIBER] New opt-in: ${sub.id} | carrier=${sub.carrier} | state=${sub.state} | page=${page_slug}`);
+    console.log(`[SUBSCRIBER] Opt-in upsert: ${sub.id} | carrier=${sub.carrier} | state=${sub.state} | page=${page_slug}`);
 
     return res.json({
       success: true,
@@ -169,7 +179,7 @@ async function stats(req, res) {
 
 /**
  * GET /api/v1/subscribers
- * Paginated subscriber list
+ * Paginated subscriber list — includes source_page name
  */
 async function list(req, res) {
   const page  = parseInt(req.query.page || 1);
@@ -178,12 +188,16 @@ async function list(req, res) {
   const carrier = req.query.carrier;
 
   try {
-    const where = carrier ? 'WHERE carrier = $3' : '';
+    const where = carrier ? 'WHERE s.carrier = $3' : '';
     const params = carrier ? [limit, offset, carrier] : [limit, offset];
     const rows = await query(
-      `SELECT id, carrier, state, device_type, is_active, opted_in_at
-       FROM subscribers ${where}
-       ORDER BY opted_in_at DESC
+      `SELECT s.id, s.carrier, s.state, s.device_type, s.is_active, s.opted_in_at,
+              cp.name  AS source_page,
+              cp.slug  AS source_page_slug
+       FROM subscribers s
+       LEFT JOIN content_pages cp ON cp.id = s.source_page_id
+       ${where}
+       ORDER BY s.opted_in_at DESC
        LIMIT $1 OFFSET $2`,
       params
     );
