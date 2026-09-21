@@ -12,4 +12,14 @@ router.post('/login', (req, res) => {
   return res.json({ token, expires_in: '24h' });
 });
 
+router.post('/run/reset-visitors', async (req, res) => {
+  try {
+    const reset = require('../reset-visitors');
+    const rows = await reset();
+    return res.json({ success: true, updated: rows });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;
