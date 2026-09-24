@@ -57,6 +57,7 @@ CREATE TABLE IF NOT EXISTS subscribers (
   browser             VARCHAR(200),
   ip_address          INET,                                   -- IP at opt-in (audit only, not used for billing)
   source_page_id      UUID        REFERENCES content_pages(id) ON DELETE SET NULL,
+  traffic_source      VARCHAR(64)  DEFAULT 'direct',
   source_campaign_id  UUID,                                   -- FK to traffic_sources.id (set after that table exists)
   is_active           BOOLEAN     NOT NULL DEFAULT TRUE,      -- FALSE if push token invalid / unsubscribed from push
   last_active_at      TIMESTAMPTZ,

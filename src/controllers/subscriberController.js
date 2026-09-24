@@ -62,6 +62,7 @@ async function collect(req, res) {
     device_type = 'ANDROID',
     os,
     browser,
+    traffic_source,
     website, // honeypot field — bots fill this, humans don't
   } = req.body;
 
@@ -95,18 +96,18 @@ async function collect(req, res) {
     // (xmax = 0) is true only on INSERT, false on UPDATE — lets us know if this is a new subscriber
     const result = await query(
       `INSERT INTO subscribers
-         (onesignal_player_id, push_token, carrier, state, device_type, os, browser,
-          ip_address, source_page_id, is_active, opted_in_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8::inet,$9,TRUE,NOW())
-       ON CONFLICT (onesignal_player_id)
-       DO UPDATE SET
-         last_active_at = NOW(),
-         is_active      = TRUE,
-         carrier        = EXCLUDED.carrier,
-         state          = EXCLUDED.state,
-         source_page_id = subscribers.source_page_id
-       RETURNING id, carrier, state, (xmax = 0) AS is_new_row`,
-      [primaryToken, push_token || primaryToken, carrier, state, device_type, os, browser, ip, sourcePageId]
+        (onesignal_player_id, push_token, carrier, state, device_type, os, browser,
+          ip_address, source_page_id, traffic_source, is_active, opted_in_at)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8::inet,$9,$10,TRUE,NOW())
+      ON CONFLICT (onesignal_player_id)
+      DO UPDATE SET
+        last_active_at = NOW(),
+        is_active      = TRUE,
+        carrier        = EXCLUDED.carrier,
+        state          = EXCLUDED.state,
+        source_page_id = subscribers.source_page_id
+      RETURNING id, carrier, state, (xmax = 0) AS is_new_row`,
+      [primaryToken, push_token || primaryToken, carrier, state, device_type, os, browser, ip, sourcePageId, traffic_source || 'direct']
     );
 
     const sub = result.rows[0];
@@ -186,13 +187,14 @@ async function list(req, res) {
     const params = carrier ? [limit, offset, carrier] : [limit, offset];
     const rows = await query(
       `SELECT s.id, s.carrier, s.state, s.device_type, s.is_active, s.opted_in_at,
+              s.traffic_source,
               cp.name  AS source_page,
               cp.slug  AS source_page_slug
-       FROM subscribers s
-       LEFT JOIN content_pages cp ON cp.id = s.source_page_id
-       ${where}
-       ORDER BY s.opted_in_at DESC
-       LIMIT $1 OFFSET $2`,
+      FROM subscribers s
+      LEFT JOIN content_pages cp ON cp.id = s.source_page_id
+      ${where}
+      ORDER BY s.opted_in_at DESC
+      LIMIT $1 OFFSET $2`,
       params
     );
     return res.json({ subscribers: rows.rows, page, limit });

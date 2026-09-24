@@ -100,6 +100,24 @@ app.use('/api/v1/events',      eventRoutes);
 app.use('/api/v1/football', footballRoutes);
 app.use('/webhooks',           webhookRoutes);
 
+// ── POSTBACK ROUTE ──
+app.post('/api/v1/postback', async (req, res) => {
+  const { click_id, page_slug, traffic_source } = req.body;
+  if (!click_id) return res.json({ ok: false, reason: 'no click_id' });
+  try {
+    const campaignId = process.env.PROPELLER_CAMPAIGN_ID || '';
+    if (campaignId) {
+      const pbUrl = `https://propellerads.com/conversion/?aid=${campaignId}&tid=${encodeURIComponent(click_id)}`;
+      fetch(pbUrl).catch(() => {});
+    }
+    console.log(`[POSTBACK] click_id=${click_id} page=${page_slug} src=${traffic_source}`);
+    res.json({ ok: true });
+  } catch(e) {
+    console.error('[POSTBACK] error:', e.message);
+    res.json({ ok: false });
+  }
+});
+
 // ── 404 ──
 app.use((req, res) => {
   res.status(404).json({ error: 'Route not found' });
