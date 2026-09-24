@@ -9,7 +9,8 @@ const campaignRoutes    = require('./routes/campaigns');
 const analyticsRoutes   = require('./routes/analytics');
 const webhookRoutes     = require('./routes/webhooks');
 const adminRoutes       = require('./routes/admin');
-const eventRoutes       = require('./routes/events');          // NEW
+const eventRoutes       = require('./routes/events');
+const footballRoutes = require('./routes/football');
 
 const { errorHandler }  = require('./middleware/errorHandler');
 const { extractMSISDN, hashMSISDN, detectCarrierFromIP } = require('./middleware/carrierQualify'); // NEW
@@ -95,7 +96,8 @@ app.use('/api/v1/subscribers', subscriberRoutes);
 app.use('/api/v1/campaigns',   campaignRoutes);
 app.use('/api/v1/analytics',   analyticsRoutes);
 app.use('/api/v1/admin',       adminRoutes);
-app.use('/api/v1/events',      eventRoutes);                  // NEW
+app.use('/api/v1/events',      eventRoutes);
+app.use('/api/v1/football', footballRoutes);
 app.use('/webhooks',           webhookRoutes);
 
 // ── 404 ──
