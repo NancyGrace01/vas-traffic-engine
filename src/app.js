@@ -105,9 +105,10 @@ app.post('/api/v1/postback', async (req, res) => {
   const { click_id, page_slug, traffic_source } = req.body;
   if (!click_id) return res.json({ ok: false, reason: 'no click_id' });
   try {
-    const campaignId = process.env.PROPELLER_CAMPAIGN_ID || '';
-    if (campaignId) {
-      const pbUrl = `https://propellerads.com/conversion/?aid=${campaignId}&tid=${encodeURIComponent(click_id)}`;
+    const accountId = process.env.CLICKADU_ACCOUNT_ID || '';
+    const aid       = process.env.CLICKADU_AID || '';
+    if (accountId && aid) {
+      const pbUrl = `https://sconvtrk.com/conversion/${accountId}/?visitor_id=${encodeURIComponent(click_id)}&aid=${aid}`;
       fetch(pbUrl).catch(() => {});
     }
     console.log(`[POSTBACK] click_id=${click_id} page=${page_slug} src=${traffic_source}`);
