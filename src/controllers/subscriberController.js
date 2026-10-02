@@ -177,19 +177,51 @@ async function stats(req, res) {
  * Paginated subscriber list — includes source_page name
  */
 async function list(req, res) {
-  const page  = parseInt(req.query.page || 1);
-  const limit = parseInt(req.query.limit || 50);
-  const offset = (page - 1) * limit;
-  const carrier = req.query.carrier;
+  const page       = parseInt(req.query.page  || 1);
+  const limit      = parseInt(req.query.limit || 50);
+  const offset     = (page - 1) * limit;
+  const carrier    = req.query.carrier;
+  const date_range = req.query.date_range;
 
   try {
-    const where = carrier ? 'WHERE s.carrier = $3' : '';
-    const params = carrier ? [limit, offset, carrier] : [limit, offset];
+    const conditions = [];
+    const params     = [limit, offset]; // $1, $2 always limit/offset
+
+    if (carrier) {
+      params.push(carrier);
+      conditions.push(`s.carrier = $${params.length}`);
+    }
+
+    if (date_range) {
+      const now = new Date();
+      if (date_range === 'today') {
+        const from = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        params.push(from.toISOString());
+        conditions.push(`s.opted_in_at >= $${params.length}`);
+      } else if (date_range === 'yesterday') {
+        const from = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+        const to   = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        params.push(from.toISOString(), to.toISOString());
+        conditions.push(`s.opted_in_at >= $${params.length - 1} AND s.opted_in_at < $${params.length}`);
+      } else if (date_range === '7days') {
+        params.push(new Date(Date.now() - 7  * 24 * 60 * 60 * 1000).toISOString());
+        conditions.push(`s.opted_in_at >= $${params.length}`);
+      } else if (date_range === '30days') {
+        params.push(new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString());
+        conditions.push(`s.opted_in_at >= $${params.length}`);
+      } else if (date_range === '90days') {
+        params.push(new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString());
+        conditions.push(`s.opted_in_at >= $${params.length}`);
+      }
+    }
+
+    const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+
     const rows = await query(
       `SELECT s.id, s.carrier, s.state, s.device_type, s.is_active, s.opted_in_at,
               s.traffic_source,
-              cp.name  AS source_page,
-              cp.slug  AS source_page_slug
+              cp.name AS source_page,
+              cp.slug AS source_page_slug
       FROM subscribers s
       LEFT JOIN content_pages cp ON cp.id = s.source_page_id
       ${where}
@@ -197,8 +229,10 @@ async function list(req, res) {
       LIMIT $1 OFFSET $2`,
       params
     );
+
     return res.json({ subscribers: rows.rows, page, limit });
   } catch (err) {
+    console.error('[SUBSCRIBER] list error:', err.message);
     return res.status(500).json({ error: 'Failed to list subscribers' });
   }
 }
