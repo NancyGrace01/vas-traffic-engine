@@ -3,7 +3,7 @@ const router  = express.Router();
 
 const FD_BASE    = 'https://api.football-data.org/v4';
 const FD_HEADERS = {
-  'X-Auth-Token': process.env.FOOTBALL_DATA_KEY,
+  'X-Auth-Token': process.env.FOOTBALL_DATA_API_KEY,
 };
 
 // Generic proxy — forwards any path to football-data.org
