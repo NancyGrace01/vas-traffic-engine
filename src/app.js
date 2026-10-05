@@ -11,6 +11,7 @@ const webhookRoutes     = require('./routes/webhooks');
 const adminRoutes       = require('./routes/admin');
 const eventRoutes       = require('./routes/events');
 const footballRoutes = require('./routes/football');
+const postbackRoutes = require('./routes/postback');
 
 const { errorHandler }  = require('./middleware/errorHandler');
 const { extractMSISDN, hashMSISDN, detectCarrierFromIP } = require('./middleware/carrierQualify'); // NEW
@@ -101,19 +102,45 @@ app.use('/api/v1/football', footballRoutes);
 app.use('/webhooks',           webhookRoutes);
 
 // ── POSTBACK ROUTE ──
+const PLATFORM_POSTBACKS = {
+  clickadu: ({ click_id }) => {
+    const accountId = process.env.CLICKADU_ACCOUNT_ID || '';
+    const aid       = process.env.CLICKADU_AID || '';
+    if (!accountId || !aid) return null;
+    return `https://sconvtrk.com/conversion/${accountId}/?visitor_id=${encodeURIComponent(click_id)}&aid=${aid}`;
+  },
+  propellerads: ({ click_id }) => {
+    if (!click_id) return null;
+    return `https://ad.propellerads.com/conversion.php?aid=3687423&pid=&tid=159926&visitor_id=${encodeURIComponent(click_id)}&payout=0`;
+  },
+  adsterra: ({ click_id }) => {
+    if (!click_id) return null;
+    return `https://www.pbterra.com/name/Kings_101/at?subid_short=${encodeURIComponent(click_id)}`;
+  },
+};
+
 app.post('/api/v1/postback', async (req, res) => {
   const { click_id, page_slug, traffic_source } = req.body;
   if (!click_id) return res.json({ ok: false, reason: 'no click_id' });
+
   try {
-    const accountId = process.env.CLICKADU_ACCOUNT_ID || '';
-    const aid       = process.env.CLICKADU_AID || '';
-    if (accountId && aid) {
-      const pbUrl = `https://sconvtrk.com/conversion/${accountId}/?visitor_id=${encodeURIComponent(click_id)}&aid=${aid}`;
-      fetch(pbUrl).catch(() => {});
+    const platformKey = (traffic_source || '').toLowerCase().trim();
+    const buildUrl    = PLATFORM_POSTBACKS[platformKey];
+
+    if (buildUrl) {
+      const pbUrl = buildUrl({ click_id });
+      if (pbUrl) {
+        fetch(pbUrl).catch(err => console.error(`[POSTBACK] ${platformKey} fetch error:`, err.message));
+        console.log(`[POSTBACK] fired ${platformKey} | click_id=${click_id} | page=${page_slug}`);
+      } else {
+        console.warn(`[POSTBACK] ${platformKey} — missing env vars, skipped`);
+      }
+    } else {
+      console.warn(`[POSTBACK] unknown traffic_source="${platformKey}" — no postback fired`);
     }
-    console.log(`[POSTBACK] click_id=${click_id} page=${page_slug} src=${traffic_source}`);
+
     res.json({ ok: true });
-  } catch(e) {
+  } catch (e) {
     console.error('[POSTBACK] error:', e.message);
     res.json({ ok: false });
   }
