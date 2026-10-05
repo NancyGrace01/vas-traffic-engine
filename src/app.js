@@ -11,7 +11,6 @@ const webhookRoutes     = require('./routes/webhooks');
 const adminRoutes       = require('./routes/admin');
 const eventRoutes       = require('./routes/events');
 const footballRoutes = require('./routes/football');
-const postbackRoutes = require('./routes/postback');
 
 const { errorHandler }  = require('./middleware/errorHandler');
 const { extractMSISDN, hashMSISDN, detectCarrierFromIP } = require('./middleware/carrierQualify'); // NEW
