@@ -14,7 +14,7 @@
 
 const axios = require('axios');
 const { query } = require('../db/client');
-const { isOnSuppression, isSubscribedCached, cacheSubscribedMsisdn } = require('../db/redis');
+const { isOnSuppression, isSubscribedCached, cacheSubscribedMsisdn, trackIPResolution } = require('../db/redis');
 const crypto = require('crypto');
 
 // Nigerian carrier IP prefixes (coarse — ip-api.com is primary)
@@ -71,7 +71,10 @@ function hashMSISDN(msisdn) {
 async function detectCarrierFromIP(ip) {
   // Try prefix map first (free, instant)
   const fromPrefix = detectCarrierFromPrefix(ip);
-  if (fromPrefix) return { carrier: fromPrefix, state: null, isMobile: true };
+  if (fromPrefix) {
+    trackIPResolution('prefix_hit').catch(() => {});
+    return { carrier: fromPrefix, state: null, isMobile: true };
+  }
 
   // Fall back to ip-api.com
   try {
@@ -80,17 +83,23 @@ async function detectCarrierFromIP(ip) {
       { timeout: 2000 }
     );
     const { status, isp = '', regionName, mobile } = res.data;
-    if (status !== 'success') return { carrier: 'UNKNOWN', state: null, isMobile: false };
+    if (status !== 'success') {
+      trackIPResolution('ipapi_error').catch(() => {});
+      return { carrier: 'UNKNOWN', state: null, isMobile: false };
+    }
+
+    trackIPResolution('ipapi_hit').catch(() => {});
 
     const ispUpper = isp.toUpperCase();
     let carrier = 'UNKNOWN';
-    if (ispUpper.includes('MTN'))                          carrier = 'MTN';
-    else if (ispUpper.includes('GLO'))                     carrier = 'GLO';
-    else if (ispUpper.includes('AIRTEL'))                  carrier = 'AIRTEL';
+    if (ispUpper.includes('MTN'))                                            carrier = 'MTN';
+    else if (ispUpper.includes('GLO'))                                       carrier = 'GLO';
+    else if (ispUpper.includes('AIRTEL'))                                    carrier = 'AIRTEL';
     else if (ispUpper.includes('9MOBILE') || ispUpper.includes('ETISALAT')) carrier = '9MOBILE';
 
     return { carrier, state: regionName || null, isMobile: !!mobile };
   } catch {
+    trackIPResolution('ipapi_error').catch(() => {});
     return { carrier: 'UNKNOWN', state: null, isMobile: false };
   }
 }

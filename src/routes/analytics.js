@@ -5,6 +5,7 @@
 const express = require('express');
 const { requireAdmin } = require('../middleware/auth');
 const { query } = require('../db/client');
+const { getIPAPIStats } = require('../db/redis');
 const router = express.Router();
 
 router.use(requireAdmin);
@@ -53,5 +54,30 @@ router.get('/content-pages', async (req, res) => {
   }
 });
 router.get('/geo',         (req, res) => res.json({ message: 'Coming in Sprint 8' }));
+
+// IP resolution stats — prefix map hits vs ip-api fallback hits vs errors
+// Useful for monitoring ip-api free tier usage (45 req/min limit)
+router.get('/ip-api-stats', async (req, res) => {
+  try {
+    const days = parseInt(req.query.days) || 7;
+    const stats = await getIPAPIStats(days);
+
+    // Summarise totals across the requested period
+    const totals = stats.reduce((acc, row) => ({
+      prefix_hit:  acc.prefix_hit  + row.prefix_hit,
+      ipapi_hit:   acc.ipapi_hit   + row.ipapi_hit,
+      ipapi_error: acc.ipapi_error + row.ipapi_error,
+    }), { prefix_hit: 0, ipapi_hit: 0, ipapi_error: 0 });
+
+    const totalResolutions = totals.prefix_hit + totals.ipapi_hit;
+    totals.ipapi_hit_pct = totalResolutions > 0
+      ? ((totals.ipapi_hit / totalResolutions) * 100).toFixed(1) + '%'
+      : '0%';
+
+    return res.json({ period_days: days, totals, daily: stats });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
 
 module.exports = router;

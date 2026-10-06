@@ -55,9 +55,49 @@ async function isSubscribedCached(msisdn) {
   return !!(await r.get(`subscribed:${msisdn}`));
 }
 
+// ── IP-API USAGE COUNTERS ──
+// Tracks how often the prefix map resolves vs ip-api fallback is hit.
+// Keys reset daily. Use GET /api/v1/analytics/ip-api-stats to view.
+const today = () => new Date().toISOString().split('T')[0];
+
+async function trackIPResolution(method) {
+  // method: 'prefix_hit' | 'ipapi_hit' | 'ipapi_error'
+  const r = getRedis();
+  const key = `ipapi_stats:${today()}:${method}`;
+  await r.incr(key);
+  await r.expire(key, 60 * 60 * 24 * 30); // keep 30 days of history
+}
+
+async function getIPAPIStats(days = 7) {
+  const r = getRedis();
+  const results = [];
+
+  for (let i = 0; i < days; i++) {
+    const d = new Date();
+    d.setDate(d.getDate() - i);
+    const date = d.toISOString().split('T')[0];
+
+    const [prefix_hit, ipapi_hit, ipapi_error] = await Promise.all([
+      r.get(`ipapi_stats:${date}:prefix_hit`),
+      r.get(`ipapi_stats:${date}:ipapi_hit`),
+      r.get(`ipapi_stats:${date}:ipapi_error`),
+    ]);
+
+    results.push({
+      date,
+      prefix_hit:  parseInt(prefix_hit  || '0'),
+      ipapi_hit:   parseInt(ipapi_hit   || '0'),
+      ipapi_error: parseInt(ipapi_error || '0'),
+    });
+  }
+
+  return results;
+}
+
 module.exports = {
   connectRedis, getRedis,
   addToSuppression, isOnSuppression,
   incrementPushCount, getPushCount,
   cacheSubscribedMsisdn, isSubscribedCached,
+  trackIPResolution, getIPAPIStats,
 };
