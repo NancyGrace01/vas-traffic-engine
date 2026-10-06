@@ -45,9 +45,13 @@ async function getFCMAccessToken() {
 }
 
 // ── SEND FCM V1 NOTIFICATION TO ONE TOKEN ──
-async function sendFCMNotification(fcmToken, campaign) {
+async function sendFCMNotification(fcmToken, campaign, subscriberId) {
   const accessToken = await getFCMAccessToken();
   const projectId   = process.env.FCM_PROJECT_ID;
+
+  // Wrap the offer URL in the click tracking redirect
+  const baseUrl    = process.env.API_BASE_URL || 'https://web-production-12a71.up.railway.app';
+  const trackUrl   = `${baseUrl}/track/click?c=${campaign.campaign_id}&s=${subscriberId}&r=${encodeURIComponent(campaign.campaign_url || baseUrl)}`;
 
   const message = {
     message: {
@@ -62,10 +66,10 @@ async function sendFCMNotification(fcmToken, campaign) {
           title: campaign.campaign_title,
           body:  campaign.campaign_message,
           icon:  campaign.campaign_icon || '/icon-192.png',
-          click_action: campaign.campaign_url || 'https://vaspush.com.ng',
+          click_action: trackUrl,
         },
         fcm_options: {
-          link: campaign.campaign_url || 'https://vaspush.com.ng',
+          link: trackUrl,
         },
       },
     },
@@ -98,7 +102,7 @@ async function sendFCMBatch(subscribers, campaign) {
     const chunk = subscribers.slice(i, i + CHUNK_SIZE);
 
     const results = await Promise.allSettled(
-      chunk.map(sub => sendFCMNotification(sub.fcm_token, campaign))
+      chunk.map(sub => sendFCMNotification(sub.fcm_token, campaign, sub.id))
     );
 
     results.forEach((result, idx) => {

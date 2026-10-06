@@ -145,6 +145,42 @@ app.post('/api/v1/postback', async (req, res) => {
   }
 });
 
+// ── CLICK TRACKING ──
+// Public route — no auth. Called when a subscriber clicks a push notification.
+// Logs the click, updates campaign_sends status, then redirects to offer URL.
+// URL format: GET /track/click?c={campaign_id}&s={subscriber_id}&r={encoded_offer_url}
+app.get('/track/click', async (req, res) => {
+  const { c: campaign_id, s: subscriber_id, r: redirect_url } = req.query;
+
+  // Always redirect — never let tracking failure strand the user
+  const fallback = redirect_url ? decodeURIComponent(redirect_url) : 'https://vaspush.com.ng';
+
+  if (campaign_id && subscriber_id) {
+    // Fire-and-forget — don't await so redirect is instant
+    Promise.all([
+      // Mark this send as CLICKED
+      query(`
+        UPDATE campaign_sends SET status = 'CLICKED', clicked_at = NOW()
+        WHERE campaign_id = $1 AND subscriber_id = $2 AND status != 'CLICKED'
+      `, [campaign_id, subscriber_id]),
+
+      // Increment campaign click counter
+      query(`
+        UPDATE campaigns SET total_clicked = total_clicked + 1, updated_at = NOW()
+        WHERE id = $1
+      `, [campaign_id]),
+
+      // Log to events table for the analytics pipeline
+      query(`
+        INSERT INTO events (event_type, subscriber_id, campaign_id, metadata, occurred_at)
+        VALUES ('PUSH_CLICKED', $1, $2, $3, NOW())
+      `, [subscriber_id, campaign_id, JSON.stringify({ redirect_url: fallback })]),
+    ]).catch(err => console.error('[TRACK] click log error:', err.message));
+  }
+
+  res.redirect(302, fallback);
+});
+
 // ── 404 ──
 app.use((req, res) => {
   res.status(404).json({ error: 'Route not found' });
