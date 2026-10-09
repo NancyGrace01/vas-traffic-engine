@@ -50,7 +50,7 @@ async function sendFCMNotification(fcmToken, campaign, subscriberId) {
   const projectId   = process.env.FCM_PROJECT_ID;
 
   // Wrap the offer URL in the click tracking redirect
-  const baseUrl    = process.env.API_BASE_URL || 'https://web-production-12a71.up.railway.app';
+  const baseUrl    = process.env.API_BASE_URL || 'https://vas-traffic-engine-production.up.railway.app';
   const trackUrl   = `${baseUrl}/track/click?c=${campaign.campaign_id}&s=${subscriberId}&r=${encodeURIComponent(campaign.campaign_url || baseUrl)}`;
 
   const message = {
